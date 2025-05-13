@@ -1,0 +1,230 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model Account {
+  id              Int      @id @default(autoincrement())
+  token           String   @db.Text
+  prof_comp       String
+  first_comp      Boolean  @default(false) // İlk profil oluşturma tamamlandı mı
+  membership_type String   @default("standard") // "standard" veya "gold"
+  goldExpiryDate  DateTime? // Gold üyelik bitiş tarihi
+  platinumExpiryDate DateTime? // Platinum üyelik bitiş tarihi
+  referralCode    String?  @unique // Referans kodu
+  usedReferralCode String? // Kullanılan referans kodu
+  lastViewedMatches DateTime? // Son görülen eşleşmeler zamanı
+  coins           Int      @default(1500) // Kullanıcının sahip olduğu coin miktarı
+  balance         Float    @default(0) // Kullanıcının bakiye miktarı (USD cinsinden)
+  isAdmin         Boolean  @default(false) // Admin kullanıcı mı
+  isModerator     Boolean  @default(false) // Moderatör kullanıcı mı
+  isBanned        Boolean  @default(false) // Kullanıcı yasaklı mı
+  banExpiry       DateTime? // Yasak bitiş tarihi (süreli yasaklama için)
+  banReason       String?  @db.Text // Yasaklanma nedeni
+  profile         Profile?
+  transactions    BalanceTransaction[] // Bakiye işlem geçmişi
+
+  @@map("accounts")
+}
+
+model Profile {
+  id        Int      @id @default(autoincrement())
+  accountid Int      @unique
+  charname  String   @db.Text
+  age       Int
+  phone     Int
+  self      String   @db.Text
+  sex       String   @db.Text
+  t_sex     String   @db.Text
+  multiple_t_sex String? @db.Text  // Platinum üyeler için çoklu yönelim (JSON formatında)
+  avatar_url String?  @db.Text
+  interests String?   @db.Text
+  reason    String?   @db.Text
+  photos    Photo[]
+  account   Account  @relation(fields: [accountid], references: [id])
+
+  @@map("profiles")
+}
+
+model Photo {
+  id        Int     @id @default(autoincrement())
+  profileId Int
+  imageUrl  String  @db.Text
+  order     Int
+  profile   Profile @relation(fields: [profileId], references: [id])
+
+  @@map("photos")
+}
+
+model LikedProfile {
+  id             Int      @id @default(autoincrement())
+  accountId      Int      // Beğenen kullanıcı
+  likedAccountId Int      // Beğenilen kullanıcı
+  isSkipped      Boolean  @default(false) // Profil beğenilmek yerine atlandı mı
+  createdAt      DateTime @default(now())
+
+  @@unique([accountId, likedAccountId])
+  @@map("liked_profiles")
+}
+
+model Match {
+  id           Int      @id @default(autoincrement())
+  accountId1   Int      // Eşleşme yapan birinci kullanıcı
+  accountId2   Int      // Eşleşme yapan ikinci kullanıcı
+  matchDate    DateTime @default(now())
+  isPending    Boolean  @default(false) // Eşleşme onay bekliyor mu
+  pendingUserId Int?    // Onay bekleyen kullanıcı ID'si
+  messages     Message[]
+  
+  @@unique([accountId1, accountId2])
+  @@map("matches")
+}
+
+model Message {
+  id        Int      @id @default(autoincrement())
+  matchId   Int      // Hangi eşleşmeye ait
+  senderId  Int      // Gönderen kullanıcı ID'si
+  content   String   @db.Text
+  mediaUrl  String?  @db.Text  // Opsiyonel medya URL'si
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  match     Match    @relation(fields: [matchId], references: [id])
+
+  @@map("messages")
+}
+
+// Hediye türleri
+enum GiftType {
+  SILVER    // Gümüş
+  GOLD      // Altın
+  EMERALD   // Zümrüt
+  DIAMOND   // Elmas
+  RUBY      // Yakut
+}
+
+// Hediye tablosu
+model Gift {
+  id             Int       @id @default(autoincrement())
+  senderId       Int       // Hediyeyi gönderen kullanıcı ID
+  receiverId     Int       // Hediyeyi alan kullanıcı ID
+  giftType       GiftType  // Hediye türü
+  specialMessage String?   @db.Text  // Özel mesaj (Yakut için)
+  isViewed       Boolean   @default(false) // Hediye görüntülendi mi
+  isAccepted     Boolean?  // Hediye kabul edildi mi (null: beklemede, true: kabul, false: red)
+  createdAt      DateTime  @default(now())
+
+  @@map("gifts")
+}
+
+// İşlem tipi enum
+enum TransactionType {
+  DEPOSIT   // Yükleme
+  PURCHASE  // Satın alma
+  REFUND    // İade
+  ADMIN     // Admin düzenlemesi
+}
+
+// Bakiye işlemleri tablosu
+model BalanceTransaction {
+  id             Int             @id @default(autoincrement())
+  accountId      Int             // İşlemi yapan kullanıcı ID
+  amount         Float           // İşlem tutarı (negatif: harcama, pozitif: yükleme)
+  transactionType TransactionType // İşlem türü
+  description    String          @db.Text // İşlem açıklaması
+  metadata       String?         @db.Text // Ek bilgiler (JSON formatında)
+  createdAt      DateTime        @default(now())
+  account        Account         @relation(fields: [accountId], references: [id])
+
+  @@map("balance_transactions")
+}
+
+// Fiyat bilgileri tablosu
+model Price {
+  id            Int       @id @default(autoincrement())
+  itemType      String    // Ürün tipi (COIN_RATE, GOLD_MEMBERSHIP, PLATINUM_MEMBERSHIP)
+  itemKey       String    // Ürün anahtarı (süre: "7", "30", "90" veya "default" için)
+  price         Float     // Fiyat (USD)
+  isActive      Boolean   @default(true) // Aktif mi
+  updatedAt     DateTime  @updatedAt
+  createdAt     DateTime  @default(now())
+
+  @@unique([itemType, itemKey])
+  @@map("prices")
+}
+
+// Admin log türleri
+enum AdminActionType {
+  PROFILE_EDIT    // Profil düzenleme
+  BAN_USER        // Kullanıcı banlama
+  UNBAN_USER      // Kullanıcı ban kaldırma
+  REMOVE_PHOTO    // Fotoğraf silme
+  REMOVE_AVATAR   // Avatar silme
+  MEMBERSHIP_CHANGE // Üyelik tipi değiştirme
+  SYSTEM_UPDATE   // Sistem ayarları güncelleme
+  OTHER           // Diğer
+}
+
+// Admin log tablosu
+model AdminLog {
+  id             Int            @id @default(autoincrement())
+  adminId        Int            // İşlemi yapan admin ID
+  targetUserId   Int?           // İşlemin yapıldığı kullanıcı ID (varsa)
+  actionType     AdminActionType // İşlem türü
+  description    String         @db.Text // İşlem açıklaması
+  oldValue       String?        @db.Text // Eski değer (JSON formatında)
+  newValue       String?        @db.Text // Yeni değer (JSON formatında)
+  ipAddress      String?        // İşlemi yapan admin IP adresi
+  createdAt      DateTime       @default(now())
+
+  @@map("admin_logs")
+}
+
+// Rapor durumu
+enum ReportStatus {
+  PENDING    // Beklemede
+  APPROVED   // Onaylandı
+  REJECTED   // Reddedildi
+}
+
+// Kullanıcı raporları
+model Report {
+  id                Int           @id @default(autoincrement())
+  reporterId        Int           // Raporu gönderen kullanıcı ID
+  reportedAccountId Int           // Raporlanan kullanıcı ID
+  reason            String        @db.Text // Rapor sebebi
+  status            ReportStatus  @default(PENDING) // Rapor durumu
+  reviewedBy        Int?          // İncelemeyi yapan admin ID (varsa)
+  reviewNote        String?       @db.Text // İnceleme notu
+  rewardAmount      Int?          // Verilen ödül coin miktarı
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  @@map("reports")
+}
+
+// Duyurular modeli
+model Announcement {
+  id        Int      @id @default(autoincrement())
+  slot      Int      @unique // 1, 2 veya 3 olabilir
+  title     String   @db.VarChar(100)
+  content   String   @db.Text
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Kullanıcılara atanmış profiller (12 saatlik sistem)
+model UserAssignedProfile {
+  id              Int      @id @default(autoincrement())
+  userId          Int      // Profili görüntüleyen kullanıcı ID
+  assignedProfileId Int    // Atanan profil ID
+  expiresAt       DateTime // Atama süresi sonu (12 saat)
+  createdAt       DateTime @default(now())
+  
+  @@unique([userId])
+  @@map("user_assigned_profiles")
+}

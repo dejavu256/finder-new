@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE `gifts` MODIFY `giftType` ENUM('ROSE', 'COFFEE', 'TEDDY', 'CARD', 'FRUITBASKET') NOT NULL;
